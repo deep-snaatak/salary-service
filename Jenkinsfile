@@ -7,7 +7,7 @@ pipeline {
   }
 
   environment {
-    // Force the environment to use the JDK 17 we installed
+    // This variable points to the specific JDK 17 installed by Jenkins
     JAVA_HOME = "${tool 'jdk17'}"
     
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
@@ -37,15 +37,10 @@ pipeline {
 
     stage('Build Backend') {
       steps {
-        dir('app') {
-          // --- DIAGNOSTIC: This will print the version in the logs ---
-          sh 'echo "Current JAVA_HOME: $JAVA_HOME"'
-          sh '$JAVA_HOME/bin/java -version'
-          
-          // --- FORCE: Explicitly use the correct Java bin ---
-          sh 'export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
-          echo 'Backend build complete.'
-        }
+        // We use the tool's JAVA_HOME to explicitly point to JDK 17
+        // We run mvn in the root directory (no dir() wrapper)
+        sh 'export JAVA_HOME=${JAVA_HOME} && export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
+        echo 'Backend build complete.'
       }
     }
 
@@ -60,10 +55,11 @@ pipeline {
             returnStdout: true
           ).trim()
 
+          // Copy Spring Boot JAR (from target/ in root) to the base server
           sh """
             scp -i /var/lib/jenkins/.ssh/jenkins.pem \
               -o StrictHostKeyChecking=no \
-              app/target/*.jar \
+              target/*.jar \
               ubuntu@${baseIp}:/opt/attendance-backend/app.jar
           """
 
