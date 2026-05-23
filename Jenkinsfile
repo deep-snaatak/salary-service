@@ -1,14 +1,15 @@
 pipeline {
   agent any
 
-  // This block forces Jenkins to use the 'jdk17' and 'maven3' 
-  // installations you configured in Manage Jenkins -> Tools
   tools {
     jdk 'jdk17'
     maven 'maven3'
   }
 
   environment {
+    // This tells the pipeline: "Use the JDK 17 you just installed"
+    JAVA_HOME = "${tool 'jdk17'}"
+    
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
     SECURITY_GROUP_ID = 'sg-029e6506bc0ed624b'
     SUBNET_ID         = 'subnet-0dc82a8cf1f36e0f3'
@@ -16,6 +17,7 @@ pipeline {
     AWS_REGION        = 'ap-south-1'
     APP_NAME          = 'salary-service'
   }
+  
 
   stages {
     stage('Branch Check') {
