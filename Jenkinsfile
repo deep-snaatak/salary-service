@@ -1,15 +1,13 @@
 pipeline {
   agent any
 
-  // This block tells Jenkins to use the isolated JDK/Maven tools 
-  // you configured in the Jenkins UI
   tools {
     jdk 'jdk17'
     maven 'maven3'
   }
 
   environment {
-    // This forces the pipeline to use the path of the tool 'jdk17'
+    // Force the environment to use the JDK 17 we installed
     JAVA_HOME = "${tool 'jdk17'}"
     
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
@@ -26,7 +24,6 @@ pipeline {
         script {
           if (env.BRANCH_NAME != 'main') {
             echo "Feature branch detected: ${env.BRANCH_NAME}"
-            echo 'Running CI only — no AMI bake, no deployment'
           }
         }
       }
@@ -40,10 +37,15 @@ pipeline {
 
     stage('Build Backend') {
       steps {
-        // We explicitly prefix the mvn command with the tool's bin path 
-        // to guarantee it uses the correct Java 17 compiler
-        sh 'export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
-        echo 'Backend build complete.'
+        dir('app') {
+          // --- DIAGNOSTIC: This will print the version in the logs ---
+          sh 'echo "Current JAVA_HOME: $JAVA_HOME"'
+          sh '$JAVA_HOME/bin/java -version'
+          
+          // --- FORCE: Explicitly use the correct Java bin ---
+          sh 'export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
+          echo 'Backend build complete.'
+        }
       }
     }
 
@@ -58,18 +60,16 @@ pipeline {
             returnStdout: true
           ).trim()
 
-          // Copy Spring Boot JAR to the base server using jenkins.pem
           sh """
             scp -i /var/lib/jenkins/.ssh/jenkins.pem \
               -o StrictHostKeyChecking=no \
-              target/*.jar \
+              app/target/*.jar \
               ubuntu@${baseIp}:/opt/attendance-backend/app.jar
           """
 
           def ts  = sh(script: 'date +%Y%m%d%H%M%S', returnStdout: true).trim()
           def amiName = "${APP_NAME}-${ts}"
-          echo "Creating AMI: ${amiName}"
-
+          
           sh "aws ec2 stop-instances --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION}"
           sh "aws ec2 wait instance-stopped --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION}"
 
@@ -79,7 +79,6 @@ pipeline {
           ).trim()
 
           env.AMI_ID = amiId
-          echo "Waiting for AMI ${amiId} to become available..."
           sh "aws ec2 wait image-available --image-ids ${amiId} --region ${AWS_REGION}"
           sh "aws ec2 start-instances --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION}"
         }
