@@ -1,13 +1,15 @@
 pipeline {
   agent any
 
+  // This block tells Jenkins to use the isolated JDK/Maven tools 
+  // you configured in the Jenkins UI
   tools {
     jdk 'jdk17'
     maven 'maven3'
   }
 
   environment {
-    // This tells the pipeline: "Use the JDK 17 you just installed"
+    // This forces the pipeline to use the path of the tool 'jdk17'
     JAVA_HOME = "${tool 'jdk17'}"
     
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
@@ -17,7 +19,6 @@ pipeline {
     AWS_REGION        = 'ap-south-1'
     APP_NAME          = 'salary-service'
   }
-  
 
   stages {
     stage('Branch Check') {
@@ -39,7 +40,9 @@ pipeline {
 
     stage('Build Backend') {
       steps {
-        sh 'mvn clean package -DskipTests'
+        // We explicitly prefix the mvn command with the tool's bin path 
+        // to guarantee it uses the correct Java 17 compiler
+        sh 'export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
         echo 'Backend build complete.'
       }
     }
