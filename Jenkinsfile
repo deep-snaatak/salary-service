@@ -1,6 +1,13 @@
 pipeline {
   agent any
 
+  // This block forces Jenkins to use the 'jdk17' and 'maven3' 
+  // installations you configured in Manage Jenkins -> Tools
+  tools {
+    jdk 'jdk17'
+    maven 'maven3'
+  }
+
   environment {
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
     SECURITY_GROUP_ID = 'sg-029e6506bc0ed624b'
