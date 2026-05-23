@@ -1,14 +1,9 @@
 pipeline {
   agent any
 
-  tools {
-    jdk 'jdk17'
-    maven 'maven3'
-  }
-
   environment {
-    // This variable points to the specific JDK 17 installed by Jenkins
-    JAVA_HOME = "${tool 'jdk17'}"
+    // Explicitly using the path you verified exists
+    JAVA_HOME = '/usr/lib/jvm/java-17-openjdk-amd64'
     
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
     SECURITY_GROUP_ID = 'sg-029e6506bc0ed624b'
@@ -19,16 +14,6 @@ pipeline {
   }
 
   stages {
-    stage('Branch Check') {
-      steps {
-        script {
-          if (env.BRANCH_NAME != 'main') {
-            echo "Feature branch detected: ${env.BRANCH_NAME}"
-          }
-        }
-      }
-    }
-
     stage('Checkout') {
       steps {
         checkout scm
@@ -37,9 +22,12 @@ pipeline {
 
     stage('Build Backend') {
       steps {
-        // We use the tool's JAVA_HOME to explicitly point to JDK 17
-        // We run mvn in the root directory (no dir() wrapper)
-        sh 'export JAVA_HOME=${JAVA_HOME} && export PATH=$JAVA_HOME/bin:$PATH && mvn clean package -DskipTests'
+        // Force the use of Java 17 by prepending it to the PATH for this shell execution
+        sh '''
+          export PATH=$JAVA_HOME/bin:$PATH
+          echo "Compiling with: $(java -version 2>&1 | head -n 1)"
+          mvn clean package -DskipTests
+        '''
         echo 'Backend build complete.'
       }
     }
@@ -48,14 +36,12 @@ pipeline {
       when { branch 'main' }
       steps {
         script {
-          echo 'Copying Spring Boot JAR to base-app-server...'
-
+          echo 'Copying Spring Boot JAR...'
           def baseIp = sh(
             script: "aws ec2 describe-instances --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION} --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text",
             returnStdout: true
           ).trim()
 
-          // Copy Spring Boot JAR (from target/ in root) to the base server
           sh """
             scp -i /var/lib/jenkins/.ssh/jenkins.pem \
               -o StrictHostKeyChecking=no \
@@ -64,13 +50,11 @@ pipeline {
           """
 
           def ts  = sh(script: 'date +%Y%m%d%H%M%S', returnStdout: true).trim()
-          def amiName = "${APP_NAME}-${ts}"
-          
           sh "aws ec2 stop-instances --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION}"
           sh "aws ec2 wait instance-stopped --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION}"
 
           def amiId = sh(
-            script: "aws ec2 create-image --instance-id ${BASE_INSTANCE_ID} --name '${amiName}' --no-reboot --region ${AWS_REGION} --query 'ImageId' --output text",
+            script: "aws ec2 create-image --instance-id ${BASE_INSTANCE_ID} --name '${APP_NAME}-${ts}' --no-reboot --region ${AWS_REGION} --query 'ImageId' --output text",
             returnStdout: true
           ).trim()
 
@@ -90,36 +74,9 @@ pipeline {
             returnStdout: true
           ).trim()
 
-          env.DEV_INSTANCE_ID = devId
           sh "aws ec2 wait instance-running --instance-ids ${devId} --region ${AWS_REGION}"
-          
           def devIp = sh(script: "aws ec2 describe-instances --instance-ids ${devId} --region ${AWS_REGION} --query 'Reservations[0].Instances[0].PublicIpAddress' --output text", returnStdout: true).trim()
-          env.DEV_IP = devIp
           echo "✅ DEV deployed: http://${devIp}/api/v1/salary"
-        }
-      }
-    }
-
-    stage('Approve QA') {
-      when { branch 'main' }
-      steps {
-        input message: "DEV verified at http://${env.DEV_IP}/api/v1/salary. Promote same AMI to QA?", ok: 'Promote to QA'
-      }
-    }
-
-    stage('Deploy QA') {
-      when { branch 'main' }
-      steps {
-        script {
-          def qaId = sh(
-            script: "aws ec2 run-instances --image-id ${env.AMI_ID} --instance-type t2.micro --key-name ${KEY_NAME} --security-group-ids ${SECURITY_GROUP_ID} --subnet-id ${SUBNET_ID} --associate-public-ip-address --region ${AWS_REGION} --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=salary-QA},{Key=Environment,Value=QA},{Key=AMI,Value=${env.AMI_ID}}]' --query 'Instances[0].InstanceId' --output text",
-            returnStdout: true
-          ).trim()
-
-          sh "aws ec2 wait instance-running --instance-ids ${qaId} --region ${AWS_REGION}"
-          def qaIp = sh(script: "aws ec2 describe-instances --instance-ids ${qaId} --region ${AWS_REGION} --query 'Reservations[0].Instances[0].PublicIpAddress' --output text", returnStdout: true).trim()
-          env.QA_IP = qaIp
-          echo "✅ QA deployed: http://${qaIp}/api/v1/salary"
         }
       }
     }
