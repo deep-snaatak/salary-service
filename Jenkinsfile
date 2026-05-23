@@ -1,13 +1,7 @@
 pipeline {
   agent any
 
-  tools {
-    jdk 'jdk17'
-    maven 'maven3'
-  }
-
   environment {
-    JAVA_HOME = "${tool 'jdk17'}"
     BASE_INSTANCE_ID  = 'i-0b05b4157183ae641'
     SECURITY_GROUP_ID = 'sg-029e6506bc0ed624b'
     SUBNET_ID         = 'subnet-0dc82a8cf1f36e0f3'
@@ -25,11 +19,8 @@ pipeline {
 
     stage('Build Backend') {
       steps {
-        // Force the use of the JDK 17 binary explicitly
-        sh '''
-          export PATH=$JAVA_HOME/bin:$PATH
-          mvn clean package -DskipTests
-        '''
+        // Maven will now automatically use the system's default Java 21
+        sh 'mvn clean package -DskipTests'
         echo 'Backend build complete.'
       }
     }
@@ -38,14 +29,11 @@ pipeline {
       when { branch 'main' }
       steps {
         script {
-          echo 'Copying Spring Boot JAR to base-server...'
-
           def baseIp = sh(
             script: "aws ec2 describe-instances --instance-ids ${BASE_INSTANCE_ID} --region ${AWS_REGION} --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text",
             returnStdout: true
           ).trim()
 
-          // Strict identity and host-key bypassing for automated environments
           sh """
             scp -i /var/lib/jenkins/.ssh/jenkins.pem \
               -o UserKnownHostsFile=/dev/null \
@@ -79,9 +67,7 @@ pipeline {
             returnStdout: true
           ).trim()
 
-          env.DEV_INSTANCE_ID = devId
           sh "aws ec2 wait instance-running --instance-ids ${devId} --region ${AWS_REGION}"
-          
           def devIp = sh(script: "aws ec2 describe-instances --instance-ids ${devId} --region ${AWS_REGION} --query 'Reservations[0].Instances[0].PublicIpAddress' --output text", returnStdout: true).trim()
           echo "✅ DEV deployed: http://${devIp}/api/v1/salary"
         }
